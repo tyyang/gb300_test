@@ -1,3 +1,8 @@
+// ============================================================
+// gb300_test — DGX GB300 C2C / EGM 頻寬測試
+// 開發者 (Developer): tyyang
+// ============================================================
+//
 // c2c_bw.cu — Host <-> Device (NVLink-C2C) 頻寬測試
 // 適用: Grace Hopper (GH200) / Grace Blackwell (GB10/GB300, DGX Spark/Station)
 // 目的: 量測 H2D (Host->Device) / D2H (Device->Host) / 雙向 的 C2C 頻寬 (GB/s)

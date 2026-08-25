@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# ============================================================
+# gb300_test — DGX GB300 C2C / EGM 頻寬測試
+# 開發者 (Developer): tyyang
+# ============================================================
+#
 # run_egm_bench.sh — 收集 EGM 狀態 + 量測 H2D/D2H C2C 頻寬
 # 在 DGX (Grace Hopper / Grace Blackwell) 上執行。EGM on/off 是 BIOS 設定,
 # 需在 BIOS 改好後重開機, 再各跑一次本腳本, 比對兩個結果檔。

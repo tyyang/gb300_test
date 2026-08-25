@@ -1,5 +1,7 @@
 # gb300_test — DGX GB300 C2C / EGM 頻寬測試
 
+> 開發者 (Developer): **tyyang**
+
 量測 Grace Blackwell（DGX Station GB300）上 Host↔Device 的 **NVLink-C2C**
 頻寬（H2D / D2H / 雙向），並收集 **EGM (Extended GPU Memory)** 狀態快照，
 用於對比 EGM on/off。
