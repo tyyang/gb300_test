@@ -1,0 +1,1393 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GLM-5.2 推論引擎 CPU Offload 技術文件</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --bg2: #161b22;
+    --bg3: #1c2128;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text2: #8b949e;
+    --green: #3fb950;
+    --green-dim: #1a3a1f;
+    --blue: #58a6ff;
+    --blue-dim: #0d2149;
+    --yellow: #d29922;
+    --yellow-dim: #2a1e00;
+    --red: #f85149;
+    --red-dim: #3b0a09;
+    --purple: #bc8cff;
+    --accent: #238636;
+    --tag-bg: #21262d;
+    --code-bg: #161b22;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans TC',
+                 'Helvetica Neue', Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+    font-size: 15px;
+  }
+
+  /* ── Layout ─────────────────────────────────────────── */
+  .layout { display: flex; min-height: 100vh; }
+
+  nav {
+    width: 260px;
+    min-width: 260px;
+    background: var(--bg2);
+    border-right: 1px solid var(--border);
+    padding: 24px 16px;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+    flex-shrink: 0;
+  }
+
+  nav h2 {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text2);
+    margin-bottom: 12px;
+    padding: 0 8px;
+  }
+
+  nav ul { list-style: none; }
+
+  nav li a {
+    display: block;
+    padding: 6px 8px;
+    border-radius: 6px;
+    color: var(--text2);
+    text-decoration: none;
+    font-size: 13px;
+    transition: all 0.15s;
+    line-height: 1.4;
+  }
+  nav li a:hover { background: var(--bg3); color: var(--text); }
+  nav li.sub a { padding-left: 20px; font-size: 12px; }
+
+  .content {
+    flex: 1;
+    max-width: 900px;
+    padding: 48px 48px 80px;
+    overflow-x: hidden;
+  }
+
+  /* ── Header ─────────────────────────────────────────── */
+  .doc-header {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 24px;
+    margin-bottom: 40px;
+  }
+
+  .doc-header h1 {
+    font-size: 28px;
+    font-weight: 700;
+    background: linear-gradient(135deg, var(--blue) 0%, var(--purple) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 12px;
+  }
+
+  .meta-tags { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+
+  .tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 500;
+    background: var(--tag-bg);
+    border: 1px solid var(--border);
+    color: var(--text2);
+  }
+  .tag.green { background: var(--green-dim); border-color: var(--green); color: var(--green); }
+  .tag.blue  { background: var(--blue-dim);  border-color: var(--blue);  color: var(--blue); }
+
+  /* ── Sections ───────────────────────────────────────── */
+  .section {
+    margin-bottom: 56px;
+    scroll-margin-top: 24px;
+  }
+
+  h2 {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--text);
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  h2 .num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    background: var(--blue-dim);
+    border: 1px solid var(--blue);
+    color: var(--blue);
+    font-size: 13px;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+
+  h3 {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text);
+    margin: 28px 0 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  h3::before {
+    content: '';
+    display: inline-block;
+    width: 3px;
+    height: 16px;
+    background: var(--blue);
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+
+  h4 {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--purple);
+    margin: 20px 0 8px;
+  }
+
+  p { margin-bottom: 12px; color: var(--text); }
+
+  /* ── Tables ─────────────────────────────────────────── */
+  .table-wrap { overflow-x: auto; margin: 16px 0; border-radius: 8px; border: 1px solid var(--border); }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13.5px;
+  }
+
+  thead { background: var(--bg3); }
+
+  th {
+    padding: 10px 14px;
+    text-align: left;
+    font-weight: 600;
+    color: var(--text2);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+
+  td {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+    vertical-align: top;
+  }
+
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(255,255,255,0.02); }
+
+  td code, th code {
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace;
+    font-size: 12px;
+    background: var(--tag-bg);
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: var(--green);
+    border: 1px solid var(--border);
+  }
+
+  td strong { color: var(--blue); }
+
+  /* ── Code Blocks ────────────────────────────────────── */
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 18px;
+    overflow-x: auto;
+    margin: 14px 0;
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace;
+    font-size: 12.5px;
+    line-height: 1.65;
+    color: var(--text);
+  }
+
+  pre.diagram {
+    color: #7ee787;
+    background: #0d1117;
+    border-color: #238636;
+  }
+
+  pre.bash { color: #a5d6ff; }
+  pre.python { color: #ffa657; }
+
+  code {
+    font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
+    font-size: 13px;
+    background: var(--tag-bg);
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: var(--green);
+    border: 1px solid var(--border);
+  }
+
+  pre code {
+    background: none;
+    border: none;
+    padding: 0;
+    font-size: inherit;
+    color: inherit;
+  }
+
+  /* ── Info Cards ─────────────────────────────────────── */
+  .card-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0; }
+  .card-grid.three { grid-template-columns: 1fr 1fr 1fr; }
+
+  @media (max-width: 700px) {
+    .card-grid, .card-grid.three { grid-template-columns: 1fr; }
+  }
+
+  .card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 18px;
+  }
+
+  .card.green { border-color: var(--green); background: var(--green-dim); }
+  .card.blue  { border-color: var(--blue);  background: var(--blue-dim); }
+  .card.yellow{ border-color: var(--yellow);background: var(--yellow-dim); }
+  .card.red   { border-color: var(--red);   background: var(--red-dim); }
+
+  .card h4 {
+    font-size: 13px;
+    font-weight: 700;
+    margin: 0 0 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .card.green h4 { color: var(--green); }
+  .card.blue  h4 { color: var(--blue); }
+  .card.yellow h4 { color: var(--yellow); }
+  .card.red   h4 { color: var(--red); }
+
+  .card p { font-size: 13px; margin: 0; color: var(--text); }
+  .card .val {
+    font-size: 24px;
+    font-weight: 700;
+    font-family: 'SF Mono', Consolas, monospace;
+    margin: 4px 0;
+  }
+  .card.green .val { color: var(--green); }
+  .card.blue  .val { color: var(--blue); }
+  .card.yellow .val { color: var(--yellow); }
+
+  /* ── Alert / Note boxes ─────────────────────────────── */
+  .note, .warn, .tip {
+    padding: 14px 16px;
+    border-radius: 8px;
+    margin: 16px 0;
+    font-size: 14px;
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+  }
+  .note  { background: var(--blue-dim);   border: 1px solid var(--blue);   color: #cae8ff; }
+  .warn  { background: var(--yellow-dim); border: 1px solid var(--yellow); color: #ffd08a; }
+  .tip   { background: var(--green-dim);  border: 1px solid var(--green);  color: #aff5b4; }
+  .note .icon, .warn .icon, .tip .icon { font-size: 16px; flex-shrink: 0; }
+
+  /* ── Comparison block ───────────────────────────────── */
+  .compare {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin: 16px 0;
+  }
+
+  @media (max-width: 650px) { .compare { grid-template-columns: 1fr; } }
+
+  .compare-box {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+
+  .compare-box.bad  { border-color: var(--red); }
+  .compare-box.good { border-color: var(--green); }
+
+  .compare-header {
+    padding: 10px 16px;
+    font-size: 13px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .compare-box.bad  .compare-header { background: var(--red-dim);   color: var(--red); }
+  .compare-box.good .compare-header { background: var(--green-dim); color: var(--green); }
+
+  .compare-body { padding: 14px 16px; font-size: 13px; line-height: 1.7; }
+
+  .compare-body .step {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+
+  .compare-body .step-num {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+  .compare-box.bad  .step-num { background: var(--red-dim);   color: var(--red); }
+  .compare-box.good .step-num { background: var(--green-dim); color: var(--green); }
+
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .badge.red    { background: var(--red-dim);    color: var(--red);    border: 1px solid var(--red); }
+  .badge.green  { background: var(--green-dim);  color: var(--green);  border: 1px solid var(--green); }
+  .badge.yellow { background: var(--yellow-dim); color: var(--yellow); border: 1px solid var(--yellow); }
+  .badge.blue   { background: var(--blue-dim);   color: var(--blue);   border: 1px solid var(--blue); }
+
+  /* ── Memory bar ─────────────────────────────────────── */
+  .mem-bar {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    margin: 16px 0;
+  }
+
+  .mem-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 10px;
+    font-size: 13px;
+  }
+  .mem-row:last-child { margin-bottom: 0; }
+
+  .mem-label { width: 160px; flex-shrink: 0; color: var(--text2); }
+
+  .mem-track {
+    flex: 1;
+    height: 20px;
+    background: var(--bg2);
+    border-radius: 4px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+
+  .mem-fill {
+    height: 100%;
+    border-radius: 3px;
+    display: flex;
+    align-items: center;
+    padding-left: 8px;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .mem-val { width: 70px; text-align: right; font-family: monospace; color: var(--text); }
+
+  /* ── Bandwidth compare ──────────────────────────────── */
+  .bw-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0; }
+  @media (max-width: 600px) { .bw-grid { grid-template-columns: 1fr; } }
+
+  .bw-card {
+    border-radius: 10px;
+    padding: 20px;
+    border: 1px solid;
+    text-align: center;
+  }
+  .bw-card.good { background: var(--green-dim); border-color: var(--green); }
+  .bw-card.slow { background: var(--red-dim);   border-color: var(--red); }
+
+  .bw-card .bw-title { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+  .bw-card.good .bw-title { color: var(--green); }
+  .bw-card.slow .bw-title { color: var(--red); }
+
+  .bw-card .bw-num {
+    font-size: 36px;
+    font-weight: 700;
+    font-family: monospace;
+    margin: 8px 0;
+  }
+  .bw-card.good .bw-num { color: var(--green); }
+  .bw-card.slow .bw-num { color: var(--red); }
+
+  .bw-card .bw-sub { font-size: 12px; color: var(--text2); }
+
+  .bw-card .bw-times {
+    margin-top: 10px;
+    font-size: 13px;
+    padding: 6px 12px;
+    border-radius: 6px;
+    display: inline-block;
+  }
+  .bw-card.good .bw-times { background: rgba(63,185,80,0.15); color: var(--green); }
+  .bw-card.slow .bw-times { background: rgba(248,81,73,0.15);  color: var(--red); }
+
+  /* ── Perf Chart ─────────────────────────────────────── */
+  .perf-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+    font-size: 13px;
+  }
+  .perf-label { width: 100px; flex-shrink: 0; color: var(--text2); }
+  .perf-bars { flex: 1; display: flex; gap: 4px; flex-direction: column; }
+  .perf-bar-wrap { display: flex; align-items: center; gap: 6px; }
+  .perf-bar {
+    height: 18px;
+    border-radius: 3px;
+    display: flex;
+    align-items: center;
+    padding-left: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #000;
+    white-space: nowrap;
+    transition: width 0.3s;
+  }
+
+  /* ── Flow diagram ───────────────────────────────────── */
+  .flow {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin: 16px 0;
+    padding: 16px;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    font-family: 'SF Mono', Consolas, monospace;
+    font-size: 13px;
+  }
+
+  .flow-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 6px 8px;
+    border-radius: 6px;
+  }
+  .flow-step:hover { background: rgba(255,255,255,0.03); }
+
+  .flow-arrow { color: var(--text2); user-select: none; }
+
+  .flow-label {
+    width: 140px;
+    flex-shrink: 0;
+    font-weight: 600;
+  }
+  .flow-label.blue   { color: var(--blue); }
+  .flow-label.green  { color: var(--green); }
+  .flow-label.yellow { color: var(--yellow); }
+  .flow-label.purple { color: var(--purple); }
+  .flow-label.red    { color: var(--red); }
+
+  .flow-desc { color: var(--text2); font-size: 12px; flex: 1; }
+
+  .flow-badge {
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+    flex-shrink: 0;
+  }
+  .flow-badge.bf16  { background: var(--blue-dim);  color: var(--blue);  border: 1px solid var(--blue); }
+  .flow-badge.nvfp4 { background: #2d1a45; color: var(--purple); border: 1px solid var(--purple); }
+  .flow-badge.fp8   { background: var(--yellow-dim);color: var(--yellow);border: 1px solid var(--yellow); }
+  .flow-badge.hot   { background: var(--green-dim); color: var(--green); border: 1px solid var(--green); }
+  .flow-badge.cold  { background: var(--red-dim);   color: var(--red);   border: 1px solid var(--red); }
+
+  /* ── Layer structure ────────────────────────────────── */
+  .layer-vis {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 16px 0;
+  }
+
+  .layer-block {
+    border-radius: 8px;
+    padding: 12px 16px;
+    border: 1px solid;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .layer-block.dense  { background: var(--blue-dim);   border-color: var(--blue); }
+  .layer-block.moe    { background: #1a0a2e; border-color: var(--purple); }
+  .layer-block.mtp    { background: var(--yellow-dim); border-color: var(--yellow); }
+
+  .layer-label {
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
+    min-width: 90px;
+  }
+  .layer-block.dense  .layer-label { color: var(--blue); }
+  .layer-block.moe    .layer-label { color: var(--purple); }
+  .layer-block.mtp    .layer-label { color: var(--yellow); }
+
+  .layer-desc { font-size: 12.5px; color: var(--text2); flex: 1; }
+  .layer-size {
+    font-size: 12px;
+    font-family: monospace;
+    padding: 3px 10px;
+    border-radius: 6px;
+    background: rgba(0,0,0,0.3);
+    white-space: nowrap;
+  }
+
+  /* ── Glossary ───────────────────────────────────────── */
+  .glossary-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin: 16px 0;
+  }
+  @media (max-width: 600px) { .glossary-grid { grid-template-columns: 1fr; } }
+
+  .gterm {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+  }
+  .gterm-name {
+    font-family: monospace;
+    font-weight: 700;
+    color: var(--green);
+    font-size: 13px;
+    margin-bottom: 4px;
+  }
+  .gterm-desc { font-size: 12.5px; color: var(--text2); line-height: 1.5; }
+
+  hr { border: none; border-top: 1px solid var(--border); margin: 40px 0; }
+
+  /* ── Scrollbar ──────────────────────────────────────── */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: var(--bg2); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #484f58; }
+</style>
+</head>
+<body>
+<div class="layout">
+
+<!-- ── Sidebar ───────────────────────────────────────────── -->
+<nav>
+  <h2>目錄</h2>
+  <ul>
+    <li><a href="#s1">1. GLM-5.2 架構解析</a></li>
+    <li class="sub"><a href="#s1-1">1.1 基本規格</a></li>
+    <li class="sub"><a href="#s1-2">1.2 MLA Attention</a></li>
+    <li class="sub"><a href="#s1-3">1.3 層結構</a></li>
+    <li class="sub"><a href="#s1-4">1.4 NVFP4 量化規則</a></li>
+    <li class="sub"><a href="#s1-5">1.5 記憶體分佈</a></li>
+    <li><a href="#s2">2. Decode Step 流程</a></li>
+    <li class="sub"><a href="#s2-1">2.1 整體流程</a></li>
+    <li class="sub"><a href="#s2-2">2.2 MoE Layer 步驟</a></li>
+    <li><a href="#s3">3. CPU Offload 機制</a></li>
+    <li class="sub"><a href="#s3-1">3.1 術語說明</a></li>
+    <li class="sub"><a href="#s3-2">3.2 為什麼需要</a></li>
+    <li><a href="#s4">4. EGM 分析</a></li>
+    <li class="sub"><a href="#s4-1">4.1 架構說明</a></li>
+    <li class="sub"><a href="#s4-2">4.2 頻寬對比</a></li>
+    <li class="sub"><a href="#s4-3">4.3 效益評估</a></li>
+    <li><a href="#s5">5. vLLM 實作</a></li>
+    <li class="sub"><a href="#s5-1">5.1 機制說明</a></li>
+    <li class="sub"><a href="#s5-2">5.2 MoE 問題</a></li>
+    <li class="sub"><a href="#s5-3">5.3 建議參數</a></li>
+    <li><a href="#s6">6. SGLang + KT-Kernel</a></li>
+    <li class="sub"><a href="#s6-1">6.1 核心改良</a></li>
+    <li class="sub"><a href="#s6-2">6.2 調度策略</a></li>
+    <li class="sub"><a href="#s6-3">6.3 效能數據</a></li>
+    <li><a href="#s7">7. 平台適用建議</a></li>
+    <li><a href="#s8">8. 術語表</a></li>
+    <li><a href="#appB">附錄 B：完整對比</a></li>
+    <li><a href="#appC">附錄 C：KV Cache 查詢</a></li>
+  </ul>
+</nav>
+
+<!-- ── Main Content ──────────────────────────────────────── -->
+<div class="content">
+
+<!-- Header -->
+<div class="doc-header">
+  <h1>GLM-5.2 推論引擎 CPU Offload 技術文件</h1>
+  <p style="color:var(--text2); font-size:14px;">深度解析 MoE Expert Offload 機制、EGM 加速原理，以及 vLLM 與 SGLang + KT-Kernel 的實作比較。</p>
+  <div class="meta-tags">
+    <span class="tag">v1.0</span>
+    <span class="tag blue">nvidia/GLM-5.2-NVFP4</span>
+    <span class="tag green">vLLM v0.27.1</span>
+    <span class="tag green">SGLang + KT-Kernel</span>
+    <span class="tag">GB300 × 2 節點</span>
+    <span class="tag">2026-08-20</span>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- Section 1 -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<div class="section" id="s1">
+<h2><span class="num">1</span>GLM-5.2 架構精確解析</h2>
+
+<div id="s1-1">
+<h3>1.1 基本規格（來自 config.json）</h3>
+<div class="card-grid three">
+  <div class="card blue">
+    <h4>總層數</h4>
+    <div class="val">78</div>
+    <p>+ 1 層 MTP（Layer 78）</p>
+  </div>
+  <div class="card yellow">
+    <h4>Dense 層</h4>
+    <div class="val">3</div>
+    <p>Layer 0–2，BF16，標準 FFN</p>
+  </div>
+  <div class="card green">
+    <h4>MoE 層</h4>
+    <div class="val">75</div>
+    <p>Layer 3–77，256 experts/層</p>
+  </div>
+</div>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>參數</th><th>值</th><th>說明</th></tr></thead>
+  <tbody>
+    <tr><td><code>num_hidden_layers</code></td><td><strong>78</strong></td><td>主要層數（Layer 0–77）</td></tr>
+    <tr><td><code>first_k_dense_replace</code></td><td><strong>3</strong></td><td>前 3 層為 Dense MLP</td></tr>
+    <tr><td><code>n_routed_experts</code></td><td><strong>256</strong> 個/層</td><td>路由 expert 數量</td></tr>
+    <tr><td><code>n_shared_experts</code></td><td><strong>1</strong> 個/層</td><td>每層必激活的共享 expert</td></tr>
+    <tr><td><code>num_experts_per_tok</code></td><td><strong>8</strong>（top-8）</td><td>每 token 激活的 routed experts</td></tr>
+    <tr><td>激活比例</td><td><strong>3.1%</strong>（8/256）</td><td>每次推論只用極少數 expert</td></tr>
+    <tr><td><code>moe_intermediate_size</code></td><td>2,048</td><td>每個 expert 的 FFN 寬度</td></tr>
+    <tr><td><code>intermediate_size</code></td><td>12,288</td><td>Dense MLP（Layer 0–2）的 FFN 寬度</td></tr>
+    <tr><td><code>hidden_size</code></td><td>6,144</td><td>模型寬度</td></tr>
+    <tr><td>總參數</td><td>~743B</td><td></td></tr>
+    <tr><td>每次激活參數</td><td>~39B</td><td></td></tr>
+    <tr><td><code>model_type</code></td><td><code>glm_moe_dsa</code></td><td>MLA + DSA 架構</td></tr>
+  </tbody>
+</table>
+</div>
+</div>
+
+<div id="s1-2">
+<h3>1.2 Attention 規格（MLA）</h3>
+<p><strong>MLA（Multi-head Latent Attention）</strong>是 GLM-5.2 的核心創新，通過壓縮 KV latent 使 KV Cache 比標準 Attention 小約 <strong>57 倍</strong>。</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>參數</th><th>值</th><th>說明</th></tr></thead>
+  <tbody>
+    <tr><td><code>num_attention_heads</code></td><td>64</td><td></td></tr>
+    <tr><td><code>q_lora_rank</code></td><td>2,048</td><td>Q 壓縮維度</td></tr>
+    <tr><td><code>kv_lora_rank</code></td><td><strong>512</strong></td><td>KV 壓縮維度（MLA 核心）</td></tr>
+    <tr><td><code>qk_nope_head_dim</code></td><td>192</td><td>非 RoPE QK 維度</td></tr>
+    <tr><td><code>qk_rope_head_dim</code></td><td>64</td><td>RoPE QK 維度</td></tr>
+    <tr><td><code>v_head_dim</code></td><td>256</td><td>V 維度</td></tr>
+  </tbody>
+</table>
+</div>
+</div>
+
+<div id="s1-3">
+<h3>1.3 層結構全覽</h3>
+<div class="layer-vis">
+  <div class="layer-block dense">
+    <span class="layer-label">Layer 0–2</span>
+    <span class="layer-desc">Dense MLP ／ MLA Attention（BF16）／ DSA Indexer（BF16）／ 標準 FFN（intermediate=12288）</span>
+    <span class="layer-size">3 層 · BF16</span>
+  </div>
+  <div class="layer-block moe">
+    <span class="layer-label">Layer 3–77</span>
+    <span class="layer-desc">MoE (Sparse) ／ MLA Attention（BF16）／ Shared Expert ×1（BF16）／ Router（sigmoid top-8）／ Routed Experts ×256（<strong>NVFP4</strong>，每次激活 8 個）</span>
+    <span class="layer-size">75 層 · 混合精度</span>
+  </div>
+  <div class="layer-block mtp">
+    <span class="layer-label">Layer 78</span>
+    <span class="layer-desc">MTP（Multi-Token Prediction）層，整層 BF16，跳過量化</span>
+    <span class="layer-size">1 層 · BF16</span>
+  </div>
+</div>
+</div>
+
+<div id="s1-4">
+<h3>1.4 NVFP4 量化規則</h3>
+<div class="note">
+  <span class="icon">ℹ️</span>
+  <span><code>quantization_config.ignore</code> 明確列出保留 BF16 的組件。<strong>只有 Layer 3–77 的 routed experts 被量化為 NVFP4</strong>，其餘全部保留 BF16。</span>
+</div>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>組件</th><th>精度</th><th>原因</th></tr></thead>
+  <tbody>
+    <tr><td><code>embed_tokens</code>、<code>lm_head</code></td><td><span class="badge blue">BF16</span></td><td>Embedding 精度敏感</td></tr>
+    <tr><td>Layer 0–2（整層）</td><td><span class="badge blue">BF16</span></td><td>Dense 層，跳過量化</td></tr>
+    <tr><td>Layer 3–77 的 <code>self_attn</code></td><td><span class="badge blue">BF16</span></td><td>Attention 精度敏感</td></tr>
+    <tr><td>Layer 3–77 的 <code>mlp.shared_experts</code></td><td><span class="badge blue">BF16</span></td><td>每層必激活，保留精度</td></tr>
+    <tr><td>Layer 78（整層）</td><td><span class="badge blue">BF16</span></td><td>MTP 層</td></tr>
+    <tr><td><strong>Layer 3–77 的 <code>mlp.experts</code>（routed）</strong></td><td><span class="badge" style="background:#2d1a45;color:#bc8cff;border:1px solid #bc8cff">NVFP4</span></td><td>主體量化目標 ← 唯一量化的部分</td></tr>
+    <tr><td>KV Cache</td><td><span class="badge yellow">FP8</span></td><td><code>kv_cache_scheme</code> 設定</td></tr>
+  </tbody>
+</table>
+</div>
+</div>
+
+<div id="s1-5">
+<h3>1.5 記憶體分佈估算</h3>
+<div class="mem-bar">
+  <div style="font-size:12px;color:var(--text2);margin-bottom:14px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;">HBM 256 GB 使用分佈（實測）</div>
+  <div class="mem-row">
+    <span class="mem-label">Routed Experts (NVFP4)</span>
+    <div class="mem-track">
+      <div class="mem-fill" style="width:78%;background:#7c3aed;color:#e9d5ff;">~200 GB（可 offload）</div>
+    </div>
+    <span class="mem-val">~200 GB</span>
+  </div>
+  <div class="mem-row">
+    <span class="mem-label">MLA Attention (BF16)</span>
+    <div class="mem-track">
+      <div class="mem-fill" style="width:10%;background:#1d4ed8;color:#bfdbfe;">~26 GB</div>
+    </div>
+    <span class="mem-val">~26 GB</span>
+  </div>
+  <div class="mem-row">
+    <span class="mem-label">Shared Experts (BF16)</span>
+    <div class="mem-track">
+      <div class="mem-fill" style="width:2.5%;background:#065f46;color:#a7f3d0;">~6 GB</div>
+    </div>
+    <span class="mem-val">~6 GB</span>
+  </div>
+  <div class="mem-row">
+    <span class="mem-label">其他 BF16 (Embed/MTP)</span>
+    <div class="mem-track">
+      <div class="mem-fill" style="width:4%;background:#374151;color:#d1d5db;">~11 GB</div>
+    </div>
+    <span class="mem-val">~11 GB</span>
+  </div>
+  <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);display:flex;justify-content:space-between;font-size:12px;color:var(--text2);">
+    <span>模型 weights 合計：<strong style="color:var(--text)">~243 GB</strong></span>
+    <span>實測 HBM 佔用：<strong style="color:var(--yellow)">244 / 256 GB（95%）</strong></span>
+    <span>剩餘 KV Cache：<strong style="color:var(--green)">~12 GB</strong></span>
+  </div>
+</div>
+
+<div class="note" style="margin-top:12px;">
+  <span class="icon">💡</span>
+  <span>KV Cache（MLA + FP8）極小：128K context ≈ <strong>5.89 GB</strong>（標準 Attention 需 ~312 GB，小 57 倍！）。真正的瓶頸是模型 weights 的 HBM 佔用。</span>
+</div>
+</div>
+
+</div><!-- /section 1 -->
+
+<hr>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- Section 2 -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<div class="section" id="s2">
+<h2><span class="num">2</span>Decode Step 完整流程</h2>
+
+<div id="s2-1">
+<h3>2.1 整體流程</h3>
+<div class="flow">
+  <div class="flow-step">
+    <span class="flow-label blue">輸入</span>
+    <span class="flow-desc">position N 的 hidden state（batch B 個 token）</span>
+  </div>
+  <div style="padding:0 8px;color:var(--text2);">↓ × 78 layers</div>
+  <div class="flow-step"><span class="flow-label green">Step A</span><span class="flow-desc">RMSNorm</span><span class="flow-badge bf16">BF16</span></div>
+  <div class="flow-step"><span class="flow-label green">Step B</span><span class="flow-desc">DSA Indexer（選 token 子集，GLM-5.2 特有）</span><span class="flow-badge bf16">BF16</span></div>
+  <div class="flow-step"><span class="flow-label green">Step C</span><span class="flow-desc">MLA Attention（壓縮 KV 存入 FP8 cache）</span><span class="flow-badge bf16">BF16</span></div>
+  <div class="flow-step"><span class="flow-label">Step D</span><span class="flow-desc">Residual Add</span></div>
+  <div class="flow-step"><span class="flow-label">Step E</span><span class="flow-desc">RMSNorm</span></div>
+  <div class="flow-step"><span class="flow-label yellow">Step F</span><span class="flow-desc">MLP（Layer 0–2: Dense / Layer 3–77: MoE ← offload 在這裡）</span><span class="flow-badge nvfp4">NVFP4</span></div>
+  <div class="flow-step"><span class="flow-label">Step G</span><span class="flow-desc">Residual Add</span></div>
+  <div style="padding:0 8px;color:var(--text2);">↓</div>
+  <div class="flow-step"><span class="flow-label blue">輸出</span><span class="flow-desc">RMSNorm → lm_head → logits → 取樣下一個 token</span></div>
+</div>
+</div>
+
+<div id="s2-2">
+<h3>2.2 MoE Layer 詳細步驟（Layer 3–77）</h3>
+
+<h4>Step F-1：Router（輕量，常駐 HBM）</h4>
+<pre class="python">
+# W_router 是小矩陣（6144×256），常駐 HBM
+router_logits = x @ W_router       # [B, 6144] @ [6144, 256] → [B, 256]
+
+# scoring_func = "sigmoid"（GLM-5.2 特有，非 softmax）
+scores = sigmoid(router_logits)
+
+# topk_method = "noaux_tc"
+top8_scores, top8_indices = topk(scores, k=8)  # 選最高的 8 個 expert
+
+# norm_topk_prob = true
+top8_weights = normalize(top8_scores)  # 加權係數
+</pre>
+
+<h4>Step F-2：Shared Expert（BF16，常駐 HBM，永遠執行）</h4>
+<pre class="python">
+# 不受 Router 控制，每層都必定執行
+shared_out = shared_expert_ffn(x)  # BF16，直接從 HBM 讀取
+</pre>
+
+<h4>Step F-3：Routed Expert 計算 ← CPU Offload 發生點</h4>
+<pre class="python">
+for expert_idx in top8_indices:
+    if expert_idx in HBM_cache:
+        # 熱 expert：直接從 HBM 讀取計算（快）
+        out_i = hbm_expert[expert_idx](x)
+    else:
+        # 冷 expert（根據框架選擇）：
+        # vLLM：整層 H2D → GPU 計算
+        # SGLang+KT：直接在 CPU 上計算（不 H2D）
+        out_i = cpu_or_offload_expert(expert_idx, x)
+</pre>
+
+<h4>Step F-4：加權合併</h4>
+<pre class="python">
+# routed_scaling_factor = 2.5（GLM-5.2 特有）
+total_out = shared_out + sum(out_i * weight_i for i in top8) * 2.5
+</pre>
+
+</div>
+</div><!-- /section 2 -->
+
+<hr>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- Section 3 -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<div class="section" id="s3">
+<h2><span class="num">3</span>CPU Offload 機制說明</h2>
+
+<div id="s3-1">
+<h3>3.1 術語</h3>
+<div class="card-grid">
+  <div class="card blue">
+    <h4>H2D — Host to Device</h4>
+    <p>CPU RAM（LPDDR5X）→ GPU HBM<br>把資料從主記憶體搬到顯卡</p>
+  </div>
+  <div class="card yellow">
+    <h4>D2H — Device to Host</h4>
+    <p>GPU HBM → CPU RAM（LPDDR5X）<br>把資料從顯卡搬回主記憶體</p>
+  </div>
+</div>
+</div>
+
+<div id="s3-2">
+<h3>3.2 為什麼需要 CPU Offload</h3>
+<div class="card-grid">
+  <div class="card red">
+    <h4>現有 TP=2（無 offload）</h4>
+    <p>每 GPU 負責 128 experts<br>模型 weights：<strong>224 GB / GPU</strong><br>剩餘 KV Cache：<strong>~19 GB</strong>（偏少）</p>
+  </div>
+  <div class="card green">
+    <h4>啟用 Offload（64 hot experts/GPU）</h4>
+    <p>模型 weights：<strong>133 GB / GPU</strong><br>剩餘 KV Cache：<strong>~84 GB（4× 提升！）</strong><br>冷 experts 移至 LPDDR5X</p>
+  </div>
+</div>
+</div>
+
+</div><!-- /section 3 -->
+
+<hr>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- Section 4 -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<div class="section" id="s4">
+<h2><span class="num">4</span>EGM（Extended GPU Memory）分析</h2>
+
+<div id="s4-1">
+<h3>4.1 架構說明</h3>
+<pre class="diagram">
+GB300 Grace Blackwell 內部架構：
+
+  ┌─────────────────────────────────────────────────────┐
+  │                   GB300 Station                     │
+  │                                                     │
+  │  ┌─────────────────┐        ┌────────────────────┐  │
+  │  │  Grace CPU      │        │  Blackwell GPU     │  │
+  │  │  Neoverse-V2    │◄──────►│  (B200)            │  │
+  │  │  72 核          │  C2C   │  HBM3e 256 GB      │  │
+  │  └────────┬────────┘ 900GB/s│  ~4 TB/s           │  │
+  │           │                 └────────────────────┘  │
+  │  LPDDR5X 744 GiB                                    │
+  │  ~273 GB/s                                          │
+  │  ↑ EGM Enable: GPU 可直接定址                       │
+  │  ↑ EGM Disable: 需走 PCIe（慢 14×）                 │
+  └─────────────────────────────────────────────────────┘
+</pre>
+</div>
+
+<div id="s4-2">
+<h3>4.2 H2D 頻寬對比</h3>
+<div class="bw-grid">
+  <div class="bw-card good">
+    <div class="bw-title">EGM Enable（C2C 直連）</div>
+    <div class="bw-num">900</div>
+    <div class="bw-sub">GB/s</div>
+    <div class="bw-times">1 expert (18.87 MB) → 0.02 ms</div>
+    <div class="bw-times" style="margin-top:6px;">1 decode step (11.3 GB) → 12.6 ms ✓</div>
+  </div>
+  <div class="bw-card slow">
+    <div class="bw-title">EGM Disable（PCIe 5.0）</div>
+    <div class="bw-num">64</div>
+    <div class="bw-sub">GB/s</div>
+    <div class="bw-times">1 expert (18.87 MB) → 0.30 ms</div>
+    <div class="bw-times" style="margin-top:6px;">1 decode step (11.3 GB) → 176.9 ms ✗</div>
+  </div>
+</div>
+</div>
+
+<div id="s4-3">
+<h3>4.3 EGM 對不同場景的效益</h3>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>場景</th><th>EGM 效益</th><th>說明</th></tr></thead>
+  <tbody>
+    <tr><td><strong>vLLM layer-level offload</strong></td><td><span class="badge yellow">🟡 中等</span></td><td>H2D 整層加速（但 96.9% 仍是無效傳輸）</td></tr>
+    <tr><td><strong>vLLM per-expert offload（未實作）</strong></td><td><span class="badge green">✅ 高</span></td><td>冷 expert H2D：177 ms → 12.6 ms，有決定性改善</td></tr>
+    <tr><td><strong>SGLang + KT-Kernel</strong></td><td><span class="badge red">❌ 低</span></td><td>冷 expert 在 CPU 直接計算，根本不做 H2D</td></tr>
+    <tr><td>模型啟動載入</td><td><span class="badge yellow">🟡 輕微</span></td><td>runai_streamer 可能利用 C2C 路徑</td></tr>
+    <tr><td>純 HBM 推論（無 offload）</td><td><span class="badge red">❌ 無</span></td><td>推論在 HBM 內，不涉及 C2C</td></tr>
+  </tbody>
+</table>
+</div>
+<div class="warn" style="margin-top:12px;">
+  <span class="icon">⚠️</span>
+  <span>EGM 目前對純 HBM 推論（無 offload）毫無效益。若不搭配 <code>--cpu-offload-gb</code>，開啟 EGM BIOS 對推論速度沒有影響。</span>
+</div>
+</div>
+
+</div><!-- /section 4 -->
+
+<hr>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- Section 5 -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<div class="section" id="s5">
+<h2><span class="num">5</span>vLLM 的 CPU Offload 實作</h2>
+
+<div id="s5-1">
+<h3>5.1 <code>--cpu-offload-gb</code> 的真實機制</h3>
+<div class="note">
+  <span class="icon">💡</span>
+  <span><strong>重要釐清</strong>：<code>--cpu-offload-gb</code> 卸載的是<strong>模型權重（Model Weights）</strong>，不是 KV Cache。機制為 Layer-level（整層），非 per-expert 粒度。</span>
+</div>
+
+<div class="flow">
+  <div style="font-size:12px;color:var(--text2);padding:4px 8px;font-weight:600;">vLLM Layer-Level Offload 流程（PR #6496 + #29941）：</div>
+  <div class="flow-step"><span class="flow-label blue">Idle 時</span><span class="flow-desc">部分 layer weights 存放在 CPU pinned memory（LPDDR5X）</span></div>
+  <div class="flow-step"><span class="flow-label green">Forward N</span><span class="flow-desc">layer N weights：CPU → GPU（H2D prefetch，async）</span></div>
+  <div class="flow-step"><span class="flow-label green">Compute N</span><span class="flow-desc">GPU 執行 layer N 的計算（同時 prefetch layer N+1）</span></div>
+  <div class="flow-step"><span class="flow-label yellow">Evict N-1</span><span class="flow-desc">layer N-1 weights：GPU → CPU（D2H evict，async）</span></div>
+</div>
+</div>
+
+<div id="s5-2">
+<h3>5.2 Layer-level Offload 對 MoE 的根本問題</h3>
+<div class="compare">
+  <div class="compare-box bad">
+    <div class="compare-header">❌ vLLM Layer-Level Offload</div>
+    <div class="compare-body">
+      <div class="step"><span class="step-num">1</span><span>Router → top-8 indices</span></div>
+      <div class="step"><span class="step-num">2</span><span>H2D：<strong>整層 256 experts × 18.87 MB = 4.78 GB！</strong></span></div>
+      <div class="step"><span class="step-num">3</span><span>GPU 計算 8 個 experts（151 MB 實際有用）</span></div>
+      <div class="step"><span class="step-num">4</span><span>D2H：整層搬回 CPU</span></div>
+      <div style="margin-top:10px;padding:8px;background:rgba(248,81,73,0.1);border-radius:6px;font-size:12px;color:var(--red);">
+        無效傳輸：96.9%（4.63 GB 白費）
+      </div>
+    </div>
+  </div>
+  <div class="compare-box good">
+    <div class="compare-header">✅ 理想的 Per-Expert Offload</div>
+    <div class="compare-body">
+      <div class="step"><span class="step-num">1</span><span>Router → top-8 indices</span></div>
+      <div class="step"><span class="step-num">2</span><span>查詢 HBM cache，識別 hot/cold experts</span></div>
+      <div class="step"><span class="step-num">3</span><span>H2D：<strong>只載入冷 experts（按需）</strong></span></div>
+      <div class="step"><span class="step-num">4</span><span>GPU 計算 hot experts + 冷 experts</span></div>
+      <div style="margin-top:10px;padding:8px;background:rgba(63,185,80,0.1);border-radius:6px;font-size:12px;color:var(--green);">
+        H2D 傳輸量：僅需要的部分（vLLM 尚未實作）
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<div id="s5-3">
+<h3>5.3 建議參數（EGM Enable 環境）</h3>
+<pre class="bash">
+vllm serve /models/afsbox/nvidia/glm5.2-nvfp4/latest \
+  --max-model-len=131072 \
+  --max-num-seqs=128 \               # 從 64 提升（KV Cache 更充裕）
+  --tensor-parallel-size=2 \
+  --gpu-memory-utilization=0.80 \    # 從 0.95 降低，釋放空間給 offload
+  --cpu-offload-gb=32 \              # 允許 32 GB offload 到 LPDDR5X
+  --max-num-batched-tokens=32768 \
+  --kv-cache-dtype=fp8 \
+  --speculative-config.method=dspark \
+  --speculative-config.num_speculative_tokens=7 \
+  --enable-prefix-caching \
+  --load-format=runai_streamer \
+  --model-loader-extra-config='{"memory_limit":0}'
+</pre>
+<div class="tip">
+  <span class="icon">💡</span>
+  <span>預期效果：HBM weights ≈ 210 GB（節省 ~33 GB）；KV Cache ≈ 50 GB（從 19 GB 提升 2.6×）；推論速度輕微下降（prefetch pipeline 掩蓋大部分延遲）。</span>
+</div>
+</div>
+
+</div><!-- /section 5 -->
+
+<hr>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- Section 6 -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<div class="section" id="s6">
+<h2><span class="num">6</span>SGLang + KT-Kernel 的改良</h2>
+
+<div id="s6-1">
+<h3>6.1 核心改良：Per-Expert 粒度 + CPU 直接計算</h3>
+<pre class="diagram">
+SGLang + KT-Kernel 的 CPU-GPU 混合推論：
+
+  GPU HBM                              CPU LPDDR5X
+  ┌────────────────────┐               ┌────────────────────┐
+  │  Hot Experts       │               │  Cold Experts      │
+  │  （高頻被選中）      │               │  （低頻被選中）     │
+  │  直接在 GPU 計算    │   並行執行    │  直接在 CPU 計算    │
+  │  （從 HBM 讀取）    │◄────────────►│  （AMX/SVE2 GEMM） │
+  └─────────┬──────────┘               └─────────┬──────────┘
+            │           加權合併兩側輸出           │
+            └──────────── → GPU（只傳結果） ───────┘
+
+  關鍵差異：冷 expert 不 H2D！直接在 CPU 上算完再傳小結果。
+</pre>
+
+<div class="compare">
+  <div class="compare-box bad">
+    <div class="compare-header">vLLM：Layer H2D</div>
+    <div class="compare-body">
+      <p>每 decode step 傳輸：<br><strong>256 experts × 18.87 MB × 75 層</strong></p>
+      <p style="color:var(--red);font-size:18px;font-weight:700;margin:8px 0;">~4.78 GB / layer</p>
+      <p style="font-size:12px;">無效傳輸率：96.9%</p>
+    </div>
+  </div>
+  <div class="compare-box good">
+    <div class="compare-header">SGLang+KT：CPU 直接計算</div>
+    <div class="compare-body">
+      <p>H2D 傳輸量：<br><strong>只傳計算結果（小張量）</strong></p>
+      <p style="color:var(--green);font-size:18px;font-weight:700;margin:8px 0;">≈ 0 GB H2D</p>
+      <p style="font-size:12px;">GPU/CPU 並行執行 hot/cold experts</p>
+    </div>
+  </div>
+</div>
+</div>
+
+<div id="s6-2">
+<h3>6.2 四種 Expert 調度策略</h3>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>策略</th><th>說明</th><th>適用場景</th></tr></thead>
+  <tbody>
+    <tr><td><code>uniform</code></td><td>每層均勻分配 N 個 GPU expert</td><td>預設，無需統計資料</td></tr>
+    <tr><td><code>frequency</code></td><td>把最常被激活的 expert 放 GPU</td><td><strong>最佳效能</strong>，需預先收集統計</td></tr>
+    <tr><td><code>front-loading</code></td><td>從第一層開始填滿 GPU</td><td>測試基準</td></tr>
+    <tr><td><code>random</code></td><td>隨機選（seed=42）</td><td>對比基準</td></tr>
+  </tbody>
+</table>
+</div>
+<div class="note">
+  <span class="icon">🔄</span>
+  <span><strong>動態更新（<code>--kt-enable-dynamic-expert-update</code>）</strong>：Prefill 階段統計激活頻率，自動將高頻 expert 換到 GPU HBM，提升後續 decode 的 GPU 命中率。</span>
+</div>
+</div>
+
+<div id="s6-3">
+<h3>6.3 實測效能（Qwen3-Next-80B，4× RTX 4090）</h3>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>GPU Expert 比例</th><th>uniform</th><th>frequency</th><th>dynamic-update</th><th>純 GPU（基準）</th></tr></thead>
+  <tbody>
+    <tr><td>0%（全 CPU）</td><td>53 t/s</td><td>53 t/s</td><td>53 t/s</td><td rowspan="6" style="vertical-align:middle;text-align:center;font-size:20px;font-weight:700;color:var(--blue);">112 t/s</td></tr>
+    <tr><td>10%</td><td>57 t/s</td><td>59 t/s</td><td><strong style="color:var(--green)">70 t/s</strong></td></tr>
+    <tr><td>30%</td><td>62 t/s</td><td>67 t/s</td><td><strong style="color:var(--green)">76 t/s</strong></td></tr>
+    <tr><td>50%</td><td>65 t/s</td><td>76 t/s</td><td><strong style="color:var(--green)">81 t/s</strong></td></tr>
+    <tr><td>70%</td><td>76 t/s</td><td>89 t/s</td><td><strong style="color:var(--green)">89 t/s</strong></td></tr>
+    <tr><td>100%</td><td>112 t/s</td><td>114 t/s</td><td>113 t/s</td></tr>
+  </tbody>
+</table>
+</div>
+<div class="tip">
+  <span class="icon">🚀</span>
+  <span><strong>30% GPU experts + dynamic update = 純 GPU 的 68% 速度</strong>，但 HBM 用量只需 30%！可大幅擴展 KV Cache 空間。</span>
+</div>
+
+<h3>6.4 GLM-5.2 官方啟動指令（KT-Kernel）</h3>
+<pre class="bash">
+# GLM-5.2 FP8，TP=8 伺服器（官方建議）
+python -m sglang.launch_server \
+  --model-path /path/to/GLM-5.2-FP8 \
+  --kt-weight-path /path/to/GLM-5.2-FP8 \
+  --kt-cpuinfer 96 \                       # CPU inference threads
+  --kt-threadpool-count 2 \
+  --kt-num-gpu-experts 30 \                # 每層 30/256 experts 在 GPU
+  --kt-method FP8 \
+  --kt-gpu-prefill-token-threshold 1024 \
+  --kt-enable-dynamic-expert-update \
+  --kt-expert-placement-strategy uniform \
+  --tp-size 8 \
+  --attention-backend nsa \
+  --kv-cache-dtype fp8_e4m3 \
+  --disable-shared-experts-fusion \
+  --tool-call-parser glm47 \
+  --reasoning-parser glm45
+</pre>
+</div>
+
+</div><!-- /section 6 -->
+
+<hr>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- Section 7 -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<div class="section" id="s7">
+<h2><span class="num">7</span>平台適用建議</h2>
+
+<h3>7.1 硬體規格（參考環境）</h3>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>節點</th><th>CPU</th><th>RAM</th><th>GPU</th><th>網路</th></tr></thead>
+  <tbody>
+    <tr><td><code>gb300-master</code></td><td>ARM Neoverse-V2 72核</td><td>744 GiB LPDDR5X</td><td>NVIDIA GB300（256 GB HBM3e）</td><td>ConnectX-8 400 GbE</td></tr>
+    <tr><td><code>gb300-worker-01</code></td><td>ARM Neoverse-V2 72核</td><td>744 GiB LPDDR5X</td><td>NVIDIA GB300（256 GB HBM3e）</td><td>ConnectX-8 400 GbE</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>7.2 各方案對比</h3>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>方案</th><th>HBM 模型佔用</th><th>KV Cache</th><th>效能</th><th>複雜度</th><th>EGM 效益</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>現有 TP=2，無 offload</strong></td>
+      <td>224 GB / GPU</td><td>~19 GB</td>
+      <td><span class="badge blue">12.8 t/s</span></td>
+      <td><span class="badge green">低</span></td>
+      <td><span class="badge red">無</span></td>
+    </tr>
+    <tr>
+      <td>vLLM + offload（EGM ✗）</td>
+      <td>可降低</td><td>增加</td>
+      <td><span class="badge red">大幅下降</span></td>
+      <td><span class="badge green">低</span></td>
+      <td>—</td>
+    </tr>
+    <tr>
+      <td>vLLM + offload（<strong>EGM ✓</strong>）</td>
+      <td>可降低</td><td>增加</td>
+      <td><span class="badge yellow">輕微下降</span></td>
+      <td><span class="badge green">低</span></td>
+      <td><span class="badge yellow">🟡 中等</span></td>
+    </tr>
+    <tr>
+      <td>SGLang + KT-Kernel（ARM 待驗證）</td>
+      <td>可大幅降低</td><td>大幅增加</td>
+      <td><span class="badge yellow">需測試</span></td>
+      <td><span class="badge red">高</span></td>
+      <td><span class="badge red">❌ 低</span></td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<div class="warn">
+  <span class="icon">⚠️</span>
+  <span><strong>ARM Neoverse-V2 注意事項</strong>：KT-Kernel 主要針對 x86 優化（Intel AMX / AMD AVX-512）。ARM 平台有 SVE2/NEON 向量指令，但 KT-Kernel 是否充分支援 ARM 需要先驗證。建議先執行 <code>kt version</code> 確認，再評估遷移收益。</span>
+</div>
+
+</div><!-- /section 7 -->
+
+<hr>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- Section 8 Glossary -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<div class="section" id="s8">
+<h2><span class="num">8</span>術語表</h2>
+<div class="glossary-grid">
+  <div class="gterm"><div class="gterm-name">H2D</div><div class="gterm-desc">Host to Device，CPU RAM → GPU HBM 傳輸</div></div>
+  <div class="gterm"><div class="gterm-name">D2H</div><div class="gterm-desc">Device to Host，GPU HBM → CPU RAM 傳輸</div></div>
+  <div class="gterm"><div class="gterm-name">MoE</div><div class="gterm-desc">Mixture of Experts，稀疏激活的 FFN 架構</div></div>
+  <div class="gterm"><div class="gterm-name">MLA</div><div class="gterm-desc">Multi-head Latent Attention，壓縮 KV 的注意力機制（GLM-5.2 / DeepSeek 特有）</div></div>
+  <div class="gterm"><div class="gterm-name">DSA</div><div class="gterm-desc">DeepSeek Sparse Attention，稀疏 token 選取機制</div></div>
+  <div class="gterm"><div class="gterm-name">MTP</div><div class="gterm-desc">Multi-Token Prediction，一次預測多個 token</div></div>
+  <div class="gterm"><div class="gterm-name">NVFP4</div><div class="gterm-desc">NVIDIA FP4 量化，4-bit float，group_size=16，含 scale factor</div></div>
+  <div class="gterm"><div class="gterm-name">EGM</div><div class="gterm-desc">Extended GPU Memory，BIOS 設定，讓 GPU 透過 C2C 直接定址 CPU RAM</div></div>
+  <div class="gterm"><div class="gterm-name">C2C</div><div class="gterm-desc">Chip-to-Chip，GB300 中 Grace CPU 與 Blackwell GPU 的直連（~900 GB/s）</div></div>
+  <div class="gterm"><div class="gterm-name">KV Cache</div><div class="gterm-desc">Key-Value Cache，Attention 的歷史 token 快取，MLA 壓縮後極小</div></div>
+  <div class="gterm"><div class="gterm-name">TP</div><div class="gterm-desc">Tensor Parallelism，將模型張量分割到多 GPU</div></div>
+  <div class="gterm"><div class="gterm-name">LRU</div><div class="gterm-desc">Least Recently Used，最久未使用優先淘汰的 cache 策略</div></div>
+  <div class="gterm"><div class="gterm-name">AMX</div><div class="gterm-desc">Advanced Matrix Extensions，Intel CPU 的矩陣運算硬體加速</div></div>
+  <div class="gterm"><div class="gterm-name">hot expert</div><div class="gterm-desc">被 router 頻繁選中的 expert，常駐 HBM</div></div>
+  <div class="gterm"><div class="gterm-name">cold expert</div><div class="gterm-desc">被 router 低頻選中的 expert，offload 到 LPDDR5X</div></div>
+  <div class="gterm"><div class="gterm-name">DSpark</div><div class="gterm-desc">NVIDIA/ASUS 專用 Speculative Decoding，搭配 Draft 模型加速生成</div></div>
+  <div class="gterm"><div class="gterm-name">prefetch</div><div class="gterm-desc">預取，在實際需要前提前將資料搬到目標位置（pipeline overlap）</div></div>
+  <div class="gterm"><div class="gterm-name">top-k routing</div><div class="gterm-desc">MoE 中每個 token 只選 k 個 expert 計算（GLM-5.2 為 top-8）</div></div>
+</div>
+</div><!-- /section 8 -->
+
+<hr>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- Appendix B -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<div class="section" id="appB">
+<h2><span class="num">B</span>附錄 B：vLLM vs SGLang+KT 完整對比</h2>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>面向</th><th>vLLM v0.27.1</th><th>SGLang + KT-Kernel</th></tr></thead>
+  <tbody>
+    <tr><td><strong>offload 粒度</strong></td><td>Layer-level（整層 256 experts）</td><td><strong>Per-expert（只處理 top-k）</strong></td></tr>
+    <tr><td><strong>冷 expert 執行位置</strong></td><td>H2D 搬到 GPU 再計算</td><td><strong>直接在 CPU 上計算（不 H2D）</strong></td></tr>
+    <tr><td><strong>H2D 傳輸量/step</strong></td><td><span class="badge red">整層 4.78 GB（96.9% 浪費）</span></td><td><span class="badge green">≈ 0（只傳計算結果）</span></td></tr>
+    <tr><td><strong>GPU/CPU 並行</strong></td><td><span class="badge red">無</span></td><td><span class="badge green">有（GPU 算熱，CPU 算冷）</span></td></tr>
+    <tr><td><strong>Expert placement 策略</strong></td><td>無</td><td>uniform / frequency / dynamic</td></tr>
+    <tr><td><strong>動態 placement 更新</strong></td><td>無</td><td><span class="badge green">✅ prefill 後自動調整</span></td></tr>
+    <tr><td><strong>EGM 效益</strong></td><td><span class="badge yellow">🟡 中等（H2D 加速）</span></td><td><span class="badge red">❌ 低（根本不 H2D）</span></td></tr>
+    <tr><td><strong>ARM 支援</strong></td><td><span class="badge green">✅</span></td><td><span class="badge yellow">⚠️ 主要 x86，ARM 待確認</span></td></tr>
+    <tr><td><strong>GLM-5.2 NVFP4</strong></td><td><span class="badge green">✅ 目前部署</span></td><td><span class="badge green">✅ 官方文件有</span></td></tr>
+    <tr><td><strong>部署複雜度</strong></td><td><span class="badge green">低</span></td><td><span class="badge red">高（需安裝 KT-Kernel）</span></td></tr>
+    <tr><td><strong>per-expert offload</strong></td><td><span class="badge yellow">Issue 尚未實作</span></td><td><span class="badge green">✅ 已實作</span></td></tr>
+  </tbody>
+</table>
+</div>
+</div><!-- /appendix B -->
+
+<hr>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- Appendix C -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<div class="section" id="appC">
+<h2><span class="num">C</span>附錄 C：KV Cache 大小快速查詢（MLA + FP8）</h2>
+
+<p style="font-size:14px;color:var(--text2);margin-bottom:8px;">
+  公式：<code>(kv_lora_rank + qk_rope_head_dim) × num_layers × 1 byte × tokens</code><br>
+  = <code>(512 + 64) × 78 × tokens = 576 × 78 × tokens</code>
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Context 長度</th><th>KV Cache（FP8）</th><th>標準 Attention（對比）</th><th>備註</th></tr></thead>
+  <tbody>
+    <tr><td>32K</td><td><strong style="color:var(--green)">1.47 GB</strong></td><td>~156 GB</td><td>輕量</td></tr>
+    <tr><td>64K</td><td><strong style="color:var(--green)">2.94 GB</strong></td><td>~312 GB</td><td>一般對話</td></tr>
+    <tr><td><strong>128K</strong></td><td><strong style="color:var(--blue)">5.89 GB</strong></td><td>~625 GB</td><td><strong>現有 max_model_len</strong></td></tr>
+    <tr><td>256K</td><td>11.78 GB</td><td>~1.2 TB</td><td>EGM offload 後可考慮</td></tr>
+    <tr><td>512K</td><td>23.55 GB</td><td>~2.4 TB</td><td></td></tr>
+    <tr><td><strong>1M</strong></td><td><strong style="color:var(--yellow)">47.11 GB</strong></td><td>~4.9 TB</td><td>理論上限</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="tip">
+  <span class="icon">🌟</span>
+  <span><strong>MLA 的 KV Cache 比標準 Attention 小約 57 倍。</strong>這意味著 KV Cache 幾乎不是瓶頸，真正的瓶頸是模型 weights 的 HBM 佔用（~243 GB）。即使是 1M context，KV Cache 也只需 47 GB，遠小於模型 weights。</span>
+</div>
+</div><!-- /appendix C -->
+
+<!-- Footer -->
+<div style="margin-top:60px;padding-top:20px;border-top:1px solid var(--border);text-align:center;color:var(--text2);font-size:12px;">
+  <p>GLM-5.2 推論引擎 CPU Offload 技術文件 v1.0 · 生成時間：2026-08-20</p>
+  <p style="margin-top:4px;">參考：<a href="https://huggingface.co/nvidia/GLM-5.2-NVFP4" style="color:var(--blue);">nvidia/GLM-5.2-NVFP4</a> · vLLM PR #6496 #29941 · KTransformers Expert Scheduling Tutorial</p>
+</div>
+
+</div><!-- /content -->
+</div><!-- /layout -->
+
+<script>
+// 側邊欄高亮目前閱讀的章節
+const sections = document.querySelectorAll('.section');
+const navLinks = document.querySelectorAll('nav a');
+
+const observer = new IntersectionObserver(entries => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      navLinks.forEach(a => a.style.color = '');
+      const id = entry.target.id;
+      const link = document.querySelector(`nav a[href="#${id}"]`);
+      if (link) link.style.color = 'var(--blue)';
+    }
+  });
+}, { threshold: 0.2 });
+
+sections.forEach(s => observer.observe(s));
+
+// 平滑滾動
+document.querySelectorAll('nav a[href^="#"]').forEach(a => {
+  a.addEventListener('click', e => {
+    e.preventDefault();
+    const target = document.querySelector(a.getAttribute('href'));
+    if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+});
+</script>
+</body>
+</html>
