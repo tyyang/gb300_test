@@ -1,0 +1,6 @@
+# compiled CUDA binary
+c2c_bw
+*.o
+
+# benchmark output
+result-*.txt
